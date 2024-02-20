@@ -1,0 +1,4 @@
+GIT_REPOSITORY_URL
+PROJECT_ID
+accessKeyId
+secretAccessKey
