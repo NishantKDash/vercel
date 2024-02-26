@@ -1,13 +1,26 @@
 const express = require("express");
 const { generateSlug } = require("random-word-slugs");
 const { ECSClient, RunTaskCommand } = require("@aws-sdk/client-ecs");
+const { Server } = require("socket.io");
+const Redis = require("ioredis");
 
 const app = express();
 const port = 9000;
+const socket_port = 9001;
 app.use(express.json());
 
+const subscriber = new Redis(process.env.redisUri);
+const io = new Server({ cors: "*" });
+
+
+io.on("connection", (socket) => {
+  socket.on("subscribe", (channel) => {
+    socket.join(channel);
+    socket.emit("message", `Joined ${channel}`);
+  });
+});
 const ecsClient = new ECSClient({
-  region:'ap-south-1',
+  region: "ap-south-1",
   credentials: {
     accessKeyId: process.env.accessKeyId,
     secretAccessKey: process.env.secretAccessKey,
@@ -15,8 +28,8 @@ const ecsClient = new ECSClient({
 });
 
 app.post("/deploy", async (req, res) => {
-  const { gitUrl } = req.body;
-  const project_id = generateSlug();
+  const { gitUrl, id } = req.body;
+  const project_id = id ? id : generateSlug();
 
   const command = new RunTaskCommand({
     cluster: process.env.cluster,
@@ -56,9 +69,9 @@ app.post("/deploy", async (req, res) => {
               value: process.env.secretAccessKey,
             },
             {
-              name:"redisUri",
-              value: process.env.redisUri
-            }
+              name: "redisUri",
+              value: process.env.redisUri,
+            },
           ],
         },
       ],
@@ -73,6 +86,19 @@ app.post("/deploy", async (req, res) => {
       url: `http://${project_id}.localhost:8000`,
     },
   });
+});
+
+async function subscribeRedis() {
+  console.log("Subscribed to logs");
+  subscriber.psubscribe("logs:*");
+  subscriber.on("pmessage", (pattern, channel, message) => {
+    io.to(channel).emit("message", message);
+  });
+}
+
+io.listen(socket_port, () => {
+  console.log(`Socket Server started at ${socket_port}`);
+  subscribeRedis()
 });
 
 app.listen(port, () => {
